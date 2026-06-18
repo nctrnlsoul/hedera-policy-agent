@@ -106,6 +106,8 @@ Open <http://localhost:3000> and chat with the agent.
 
 Try these in the chat UI to see the policy layer in action. With the default policy settings (HBAR limit `10`, token limit `10`, time window `9`–`17` UTC):
 
+> **Heads-up:** run during 09:00–17:00 UTC, or widen the window in `shared/policies/time-window-policy.js` (e.g. `0`–`24`) so the size-limit demos aren't masked by the business-hours block.
+
 1. **HBAR — passes** — small transfer, under the size limit, inside the time window:
    > *Send 1 HBAR to `0.0.98`.*
 
