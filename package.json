@@ -7,6 +7,7 @@
     "web": "next dev web",
     "web:build": "next build web",
     "web:start": "next start web",
+    "vercel-build": "next build web",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
