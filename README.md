@@ -1,124 +1,114 @@
-# Hedera Agent App
+# Hedera Policy Agent
 
-A Hedera Agent Kit starter project. Ships two run modes out of the box:
+An AI agent that makes payments on Hedera and enforces runtime policies (Hedera Agent Kit Hooks & Policies) before any transfer executes.
 
-- `npm run web` — Next.js chat UI with optional human-in-the-loop transaction signing
-- `npm run cli` — interactive terminal chat against the same agent
+> Submission for **Hedera AI Bounty — Week 5: Policy Agent**.
 
-## Quick start
+---
+
+## What it does
+
+A natural-language agent for the Hedera network. You can ask it to send HBAR, create fungible tokens, airdrop tokens, query balances, and so on — but every transfer is intercepted by a **policy layer** before it touches the network. If a policy says no, the transaction never executes and the agent surfaces a clear reason.
+
+- Built on the [Hedera Agent Kit](https://github.com/hashgraph/hedera-agent-kit-js) (v4).
+- Runs on Hedera **testnet** out of the box.
+- Web UI powered by Next.js with an LLM (OpenAI or Anthropic) driving tool calls.
+
+---
+
+## The policies
+
+Both policies extend `AbstractPolicy` from `@hashgraph/hedera-agent-kit` and are registered in the `hooks` array of [`shared/config.js`](shared/config.js). They are the core of this submission.
+
+### 1. Business Hours Only — `shared/policies/time-window-policy.js`
+
+Blocks HBAR transfers attempted outside a configurable UTC hour window. Implemented at the **pre-tool-execution** stage — the cheapest stage to reject, since no parameter normalization or network round-trip is needed.
+
+Configure by editing the two constants at the top of the file:
+
+```js
+const ALLOWED_START_HOUR_UTC = 9;   // inclusive, 0–23
+const ALLOWED_END_HOUR_UTC   = 17;  // exclusive, 0–24
+```
+
+A transfer is blocked when `currentUtcHour < START || currentUtcHour >= END`. Defaults to **09:00–17:00 UTC** (business hours); widen or shift the window by editing the constants.
+
+### 2. Per-Transfer Size Limit — `shared/policies/transfer-size-policy.js`
+
+Blocks any HBAR transfer whose total outgoing amount exceeds a configurable limit. Implemented at the **post-params-normalization** stage — that's the first stage at which the kit has parsed the user's natural-language amount into a numeric `Hbar` value, so it's the earliest point we can compare against a numeric threshold.
+
+Configure by editing the single constant at the top of the file:
+
+```js
+const MAX_HBAR_PER_TRANSFER = 10;   // HBAR
+```
+
+The policy sums the positive (credit) entries in `normalisedParams.hbarTransfers`, mirroring the amount-handling logic of the kit's built-in `MaxRecipientsPolicy` (tolerates `Hbar`, `BigNumber`, number, or string).
+
+---
+
+## How it works
+
+```
+shared/config.js
+└── hooks: [ TimeWindowPolicy, TransferSizeLimitPolicy ]
+                       │
+                       ▼
+       Hedera Agent Kit runtime
+                       │
+   ┌───────────────────┼───────────────────┐
+   ▼                   ▼                   ▼
+pre-tool-execution   post-params-norm   (other stages)
+   │                   │
+   └── time window ────┴── size limit
+```
+
+Every relevant tool call (currently scoped to `transfer_hbar_tool` via each policy's `relevantTools` field) passes through the registered hooks. If any policy's `shouldBlock…` method returns `true`, the kit throws and the agent reports:
+
+> *Action transfer_hbar_tool blocked by policy: \<policy name\> (\<description\>)*
+
+— instead of executing.
+
+---
+
+## Setup & run
+
+**Requirements:** Node.js **22+**.
 
 ```bash
-cp .env.example .env
-# fill HEDERA_ACCOUNT_ID, HEDERA_PRIVATE_KEY, and OPENAI_API_KEY (or ANTHROPIC_API_KEY)
-
+# 1. Install
 npm install
-npm run web   # open http://localhost:3000
-# or
-npm run cli
+
+# 2. Configure
+cp .env.example .env
+# then edit .env and fill in:
+#   HEDERA_ACCOUNT_ID    your testnet account, e.g. 0.0.12345
+#   HEDERA_PRIVATE_KEY   HEX / ECDSA private key for that account
+#   HEDERA_NETWORK       testnet
+#   LLM_PROVIDER         openai | anthropic
+#   OPENAI_API_KEY  OR   ANTHROPIC_API_KEY
+
+# 3. Run the web app
+npm run web
 ```
 
-## What to edit
+Open <http://localhost:3000> and chat with the agent.
 
-All agent wiring lives in **`shared/config.js`** — a data-only module:
+---
 
-- `plugins` — the list of Hedera Agent Kit plugins available to the agent
-- `systemPrompt` — the inline system prompt
-- `mode` — `"auto"` (server signs and submits) or `"human"` (browser wallet signs)
-- `hooks` — policies and audit hooks applied to every tool call
-- `config` — per-plugin runtime configuration
-- `client` — the Hedera SDK client bound to your operator
+## Demo prompts
 
-Each runtime (CLI and web) reads from `shared/config.js` and constructs its own toolkit + LLM. Both run modes pick up edits to that file. The web app always uses the Vercel AI SDK; the CLI uses whichever framework was selected at scaffold time (`--framework ai-sdk` or `--framework langchain`).
+Try these in the chat UI to see the policy layer in action. With the default policy settings (size limit `10` HBAR, time window `9`–`17` UTC):
 
-## Third-party plugins
+1. **Passes** — small transfer, under the size limit, inside the time window:
+   > *Send 1 HBAR to `0.0.98`.*
 
-Plugins outside `@hashgraph/hedera-agent-kit/plugins` — including Saucerswap, Memejob, Pyth, Chainlink, and CoinCap — are **not bundled with downloads from the Hedera Portal**. If you selected one in the Agent Lab wizard, your downloaded zip ships with the 10 core plugins only.
+2. **Blocked by size limit** — exceeds `MAX_HBAR_PER_TRANSFER = 10`:
+   > *Send 50 HBAR to `0.0.98`.*
+   >
+   > → *"blocked by policy: Per-Transfer Size Limit"*
 
-To add a third-party plugin manually:
-
-1. `npm install <package-name>` (e.g. `npm install chainlink-pricefeed-plugin`)
-2. Import the plugin symbol in `shared/config.js` and add it to the `plugins` array.
-3. If the plugin needs runtime config, add a key to the `config` export per the plugin's docs (e.g. `saucerswap: { apiKey: process.env.SAUCERSWAP_API_KEY }`).
-4. Set any required env vars in `.env`.
-
-## Switching frameworks
-
-Re-download the project from the Hedera Portal with the other framework selected, then copy your plugin selection + custom prompt into the new `shared/config.js`.
-
-## Project layout
-
-```
-shared/config.js             # single edit surface for agent wiring (data only)
-cli/index.js                 # terminal chat (AI SDK or LangChain, per scaffold)
-web/                         # Next.js project root
-  src/app/page.jsx           # chat home
-  src/app/api/chat/route.js  # chat-completion endpoint (AI SDK)
-  src/features/              # chat UI + Hedera integration + wallet
-.env                         # operator credentials and LLM keys (never commit)
-```
-
-## Environment variables
-
-| Variable | Purpose |
-|---|---|
-| `HEDERA_ACCOUNT_ID` | Account ID like `0.0.x` |
-| `HEDERA_PRIVATE_KEY` | ECDSA private key (DER hex or `0x`-prefixed 64-hex) |
-| `HEDERA_NETWORK` | `testnet` (default) or `mainnet` |
-| `LLM_PROVIDER` | `openai` or `anthropic` |
-| `LLM_MODEL` | Model id; provider-specific defaults apply if unset |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Pick the one matching `LLM_PROVIDER` |
-
-## Deploying the web app to Vercel
-
-`web/` is a standard Next.js 16 project root. `web/next.config.js` already pins `outputFileTracingRoot` one level up so the bundler picks up `shared/config.js` from outside the Next.js root — no extra Vercel config needed for that.
-
-### Step by step (dashboard)
-
-1. **Push your project to Git.**
-
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit"
-   # then create a GitHub/GitLab/Bitbucket repo and push
-   ```
-
-   Confirm `.env` is in `.gitignore` (the scaffold ships it that way) — never commit operator credentials.
-
-2. **Import the repo in Vercel.** Go to <https://vercel.com/new> and pick your repo.
-
-3. **Set the Root Directory to `web`.** In the project settings during import, click "Edit" next to the auto-detected root and change it to `web`. This is critical — the scaffold's root holds `shared/` + `cli/`; Vercel deploys only what's under the Root Directory you choose.
-
-4. **Add environment variables.** Project Settings → Environment Variables. Add each for **Production**, **Preview**, and **Development**:
-
-   | Variable | Value |
-   |---|---|
-   | `HEDERA_ACCOUNT_ID` | Your account ID (e.g. `0.0.1234`) |
-   | `HEDERA_PRIVATE_KEY` | Your ECDSA private key |
-   | `HEDERA_NETWORK` | `testnet` or `mainnet` |
-   | `LLM_PROVIDER` | `openai` or `anthropic` |
-   | `LLM_MODEL` | (optional) e.g. `gpt-4o-mini` |
-   | `OPENAI_API_KEY` *or* `ANTHROPIC_API_KEY` | Pick the one matching `LLM_PROVIDER` |
-
-5. **Click Deploy.** First build takes ~2–3 minutes. Subsequent commits to the default branch auto-deploy.
-
-### Step by step (Vercel CLI)
-
-```bash
-npm install -g vercel
-vercel login
-vercel link             # accept defaults; when asked for project root, enter: web
-vercel env add HEDERA_ACCOUNT_ID production
-vercel env add HEDERA_PRIVATE_KEY production
-vercel env add HEDERA_NETWORK production
-vercel env add LLM_PROVIDER production
-vercel env add LLM_MODEL production
-vercel env add OPENAI_API_KEY production   # or ANTHROPIC_API_KEY
-vercel --prod
-```
-
-### Notes
-
-- `cli/` is not deployed — Vercel only serves the Next.js app under `web/`. To run the CLI in production, run it locally or in a separate container with the same `.env`.
-- Edits to `shared/config.js` (e.g. changing the plugin set or system prompt) require a new commit and redeploy.
-- For local dev against Vercel's environment, `vercel dev` runs the project the way Vercel does and reads the same env vars from the dashboard.
+3. **Blocked by time window** — run this outside 09:00–17:00 UTC (or temporarily edit the constants in `shared/policies/time-window-policy.js` to a window that excludes the current UTC hour, then restart the dev server):
+   > *Send 1 HBAR to `0.0.98`.*
+   >
+   > → *"blocked by policy: Business Hours Only"*

@@ -1,7 +1,7 @@
 import { AbstractPolicy } from "@hashgraph/hedera-agent-kit";
 
-const ALLOWED_START_HOUR_UTC = 0;
-const ALLOWED_END_HOUR_UTC = 24;
+const ALLOWED_START_HOUR_UTC = 9;
+const ALLOWED_END_HOUR_UTC = 17;
 
 export class TimeWindowPolicy extends AbstractPolicy {
   name = "Business Hours Only";
