@@ -6,7 +6,7 @@ const ALLOWED_END_HOUR_UTC = 17;
 export class TimeWindowPolicy extends AbstractPolicy {
   name = "Business Hours Only";
   description = "Transfers are only allowed within the configured UTC window";
-  relevantTools = ["transfer_hbar_tool"];
+  relevantTools = ["transfer_hbar_tool", "airdrop_fungible_token_tool"];
 
   shouldBlockPreToolExecution(_params, _method) {
     const currentHour = new Date().getUTCHours();
