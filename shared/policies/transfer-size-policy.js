@@ -8,7 +8,7 @@ export class TransferSizeLimitPolicy extends AbstractPolicy {
   description = "Transfers above the configured per-asset limit require review";
   relevantTools = ["transfer_hbar_tool", "airdrop_fungible_token_tool"];
 
-  async shouldBlockPostParamsNormalization(allParams, method) {
+  shouldBlockPostParamsNormalization(allParams, method) {
     if (method === "transfer_hbar_tool") {
       const transfers = allParams.normalisedParams?.hbarTransfers ?? [];
       let totalHbar = 0;
@@ -30,38 +30,14 @@ export class TransferSizeLimitPolicy extends AbstractPolicy {
     }
 
     if (method === "airdrop_fungible_token_tool") {
-      const transfers = allParams.normalisedParams?.tokenTransfers ?? [];
-      if (transfers.length === 0) return false;
-
-      let totalBaseUnits = 0;
-      let tokenId;
-      for (const transfer of transfers) {
-        if (!tokenId && transfer?.tokenId) tokenId = transfer.tokenId;
-        const amt = transfer?.amount;
-        if (amt == null) continue;
-        let asNumber;
-        if (typeof amt === "object") {
-          const bn = typeof amt.toBigNumber === "function" ? amt.toBigNumber() : amt;
-          asNumber = typeof bn.toNumber === "function" ? bn.toNumber() : Number(bn);
-        } else {
-          asNumber = Number(amt);
-        }
+      const recipients = allParams.rawParams?.recipients ?? [];
+      let totalDisplay = 0;
+      for (const recipient of recipients) {
+        const asNumber = Number(recipient?.amount);
         if (Number.isFinite(asNumber) && asNumber > 0) {
-          totalBaseUnits += asNumber;
+          totalDisplay += asNumber;
         }
       }
-
-      if (totalBaseUnits === 0) return false;
-      if (!tokenId) return true;
-
-      const mirrorNode = allParams.context?.mirrornodeService;
-      if (!mirrorNode) return true;
-
-      const tokenInfo = await mirrorNode.getTokenInfo(tokenId);
-      const decimals = parseInt(tokenInfo?.decimals, 10);
-      if (!Number.isFinite(decimals) || decimals < 0) return true;
-
-      const totalDisplay = totalBaseUnits / Math.pow(10, decimals);
       return totalDisplay > MAX_TOKEN_PER_TRANSFER;
     }
 
