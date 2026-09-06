@@ -31,7 +31,10 @@ describe("shared/config", () => {
     expect(mod.plugins.length).toBeGreaterThan(0);
     expect(mod.mode).toMatch(/^(auto|human)$/);
     expect(Array.isArray(mod.hooks)).toBe(true);
-    expect(mod.hooks).toEqual([]);
+    expect(mod.hooks.map((hook) => hook.name)).toEqual([
+      "Business Hours Only",
+      "Per-Transfer Size Limit",
+    ]);
     expect(typeof mod.config).toBe("object");
     expect(mod.config).not.toBeNull();
     expect(Object.keys(mod.config)).toEqual([]);
