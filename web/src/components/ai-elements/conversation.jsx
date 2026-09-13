@@ -62,7 +62,13 @@ export function Conversation({ className, children, ...props }) {
         onScroll={onScroll}
         className="h-full overflow-y-auto px-4 py-6"
       >
-        <div ref={contentRef}>{children}</div>
+        {/* Flex rather than a percentage chain. `min-h-full` here is fine
+            because the viewport above has a real height, but a percentage
+            min-height on a child of THIS box would resolve against `auto` and
+            collapse to zero, which is why the empty state would not centre. */}
+        <div ref={contentRef} className="flex min-h-full flex-col">
+          {children}
+        </div>
       </div>
       {!pinnedToBottom && (
         <Button
@@ -86,7 +92,7 @@ export function ConversationContent({
   return (
     <div
       data-slot="conversation-content"
-      className={cn("mx-auto flex max-w-3xl flex-col gap-6", className)}
+      className={cn("mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6", className)}
       {...props}
     />
   );

@@ -3,27 +3,32 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
-import {
-  useChatExtension,
-} from "@/features/chat/extension";
+import { useChatExtension } from "@/features/chat/extension";
 
 export function ChatEmptyState({ onSelect }) {
   const { suggestions } = useChatExtension();
   return (
     <div
       data-slot="empty-state"
-      className="mx-auto flex w-full max-w-2xl flex-col items-center gap-6 py-16 text-center"
+      // Was `py-16` inside a tall scroll area, which parked the whole block at
+      // the top and left a large empty band above the composer. Centring it
+      // costs nothing and closes the gap.
+      className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-8 px-4 py-12"
     >
-      <div className="flex flex-col items-center gap-2">
-        <div className="text-base font-semibold">
+      <div className="flex flex-col gap-1.5">
+        <h2 className="text-[22px] leading-tight font-semibold tracking-[-0.01em]">
           Start chatting with your agent
-        </div>
-        <div className="text-muted-foreground text-sm">
+        </h2>
+        <p className="text-muted-foreground max-w-[58ch] text-[14px] leading-relaxed">
           Pick a suggestion to populate the composer, then edit the placeholder
           IDs before sending.
-        </div>
+        </p>
       </div>
-      <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+
+      {/* `bg-border` on the container is what turns the 1px gaps into hairline
+          dividers: the cells paint `bg-background` over it and the gaps show
+          through. Without it the gaps are white on white and invisible. */}
+      <div className="bg-border grid w-full grid-cols-1 gap-px overflow-hidden rounded-xl border sm:grid-cols-2">
         {suggestions.map((chip) => (
           <SuggestionButton key={chip.id} chip={chip} onSelect={onSelect} />
         ))}
@@ -32,29 +37,38 @@ export function ChatEmptyState({ onSelect }) {
   );
 }
 
-function SuggestionButton({
-  chip,
-  onSelect,
-}) {
+// One bordered grid with hairline dividers, rather than six separately bordered
+// cards floating in space. The uniform `rounded-lg border` on every card is the
+// documented shadcn-default tell, and six of them in a 2x3 grid reads as a
+// template. This keeps a single edge and lets the rows sit as one object.
+function SuggestionButton({ chip, onSelect }) {
   return (
     <button
       type="button"
       onClick={() => onSelect(chip.prompt)}
       className={cn(
-        "border-input bg-background hover:bg-accent hover:text-accent-foreground focus-visible:ring-ring/50",
-        "flex flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left text-sm transition-colors",
-        "outline-none focus-visible:ring-[3px]",
+        "group bg-background hover:bg-accent focus-visible:ring-ring/50 relative",
+        "flex h-full flex-col items-start gap-1.5 px-4 py-3.5 text-left outline-none",
+        "transition-colors focus-visible:ring-[3px] focus-visible:z-10",
       )}
     >
-      <div className="flex w-full items-center justify-between gap-2">
-        <span className="font-medium">{chip.label}</span>
+      {/* The affordance lives on an edge that appears on hover, so the resting
+          state stays quiet and the active one is unmistakable. */}
+      <span
+        aria-hidden
+        className="bg-foreground/0 group-hover:bg-foreground/70 absolute inset-y-0 left-0 w-[2px] transition-colors"
+      />
+
+      <span className="flex w-full items-baseline justify-between gap-3">
+        <span className="text-[14px] font-medium">{chip.label}</span>
         {chip.mutating ? (
-          <span className="bg-muted text-muted-foreground rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide">
-            Mutating
+          <span className="text-muted-foreground shrink-0 font-mono text-[10px] tracking-[0.1em] uppercase">
+            mutating
           </span>
         ) : null}
-      </div>
-      <span className="text-muted-foreground line-clamp-2 text-xs">
+      </span>
+
+      <span className="text-muted-foreground line-clamp-2 text-[13px] leading-[1.5]">
         {chip.prompt}
       </span>
     </button>

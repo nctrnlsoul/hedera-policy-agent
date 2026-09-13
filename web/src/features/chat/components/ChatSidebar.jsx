@@ -21,11 +21,14 @@ export function ChatSidebar({
 
   return (
     <aside className="bg-card flex w-64 shrink-0 flex-col border-r">
-      <div className="flex items-center justify-between px-4 py-3 border-b">
-        <span className="text-sm font-semibold">Chats</span>
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+        <span className="text-muted-foreground text-[11px] font-medium tracking-[0.08em] uppercase">
+          Chats
+        </span>
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
+          className="text-muted-foreground hover:text-foreground h-7 gap-1.5 px-2 text-[13px]"
           onClick={createNewChat}
           title="Start a new chat"
         >
@@ -33,10 +36,12 @@ export function ChatSidebar({
         </Button>
       </div>
       <ScrollArea className="flex-1">
-        <ul className="flex flex-col gap-0.5 p-2">
+        <ul className="flex flex-col gap-px px-2 pb-2">
           {entries.length === 0 ? (
-            <li className="text-muted-foreground px-2 py-6 text-center text-xs">
-              No chats yet. Start one to see it here.
+            <li className="text-muted-foreground px-3 py-8 text-center text-[13px] leading-relaxed">
+              No chats yet.
+              <br />
+              Start one to see it here.
             </li>
           ) : (
             entries.map((entry) => (

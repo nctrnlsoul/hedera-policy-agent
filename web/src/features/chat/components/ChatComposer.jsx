@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { cn } from "@/lib/utils";
 import {
   PromptInput,
   PromptInputSubmit,
@@ -41,7 +42,12 @@ export const ChatComposer = React.forwardRef(
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-6">
         {errorMessage ? (
-          <div className="text-destructive mb-2 text-sm">{errorMessage}</div>
+          <div
+            role="alert"
+            className="border-destructive/30 bg-destructive/5 text-destructive mb-2 rounded-lg border px-3 py-2 text-[13px] leading-relaxed"
+          >
+            {errorMessage}
+          </div>
         ) : null}
         <PromptInput
           onSubmit={(event) => {
@@ -58,7 +64,18 @@ export const ChatComposer = React.forwardRef(
             disabled={isStreaming}
           />
           <PromptInputToolbar>
-            <span className="text-muted-foreground text-xs">
+            {/* Fades in only once there is something to send. As permanent
+                text it is onboarding that never stops being shown, and it
+                competes with the placeholder directly above it. Opacity rather
+                than conditional rendering, so the toolbar never changes height
+                and the submit button does not jump. */}
+            <span
+              aria-hidden={input.length === 0}
+              className={cn(
+                "text-muted-foreground text-xs transition-opacity duration-200",
+                input.length > 0 ? "opacity-100" : "opacity-0",
+              )}
+            >
               Enter to send · Shift+Enter for newline
             </span>
             <PromptInputSubmit

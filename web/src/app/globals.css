@@ -140,6 +140,24 @@
 }
 
 @layer base {
+  /* Radix ScrollArea renders an inner wrapper inside its Viewport with
+     `display: table; min-width: 100%`. A table sizes to its CONTENT, so any
+     flex row inside it cannot shrink: `flex-1 min-w-0` stops working and
+     `truncate` never engages.
+
+     Measured in the chat sidebar on 2026-09-13: a row with a real chat title
+     rendered 507px wide inside a 256px aside, putting the rename and delete
+     buttons at x=455 and x=487, roughly 230px past the edge, clipped and
+     unclickable. A short title fit, which is why it looked fine on a fresh
+     chat and broke the moment a chat had a real name.
+
+     Fixed once here rather than at each call site, so a future ScrollArea
+     inherits the fix instead of rediscovering the bug. */
+  [data-slot="scroll-area-viewport"] > div {
+    display: block !important;
+    width: 100%;
+  }
+
   * {
     @apply border-border outline-ring/50;
   }
