@@ -8,11 +8,19 @@ import { mergeExtensions } from "./registry";
 let warnSpy;
 
 beforeEach(() => {
+  // `warnCollision` is guarded by `process.env.NODE_ENV !== "production"`, so
+  // these tests assert behaviour that only exists outside production. Without
+  // pinning it they pass or fail depending on the shell that launched vitest,
+  // and an inherited NODE_ENV=production made three of them fail against a
+  // repo that was not broken. Stubbed rather than set globally so the
+  // workaround cannot leak into a build that legitimately needs production.
+  vi.stubEnv("NODE_ENV", "development");
   warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   warnSpy.mockRestore();
+  vi.unstubAllEnvs();
 });
 
 function ext(overrides) {

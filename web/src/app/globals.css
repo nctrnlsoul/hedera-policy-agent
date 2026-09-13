@@ -161,3 +161,60 @@
     cursor: not-allowed;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   POLICY CONSOLE TOKENS
+
+   brand-set: blossom
+
+   Declared per Design Gate (corrected 2026-09-11). A missing declaration is
+   RED, not a pass. NorthSchema has two live logo sets and neither replaces the
+   other: the blossom lockup carries #4392E6, the NS monogram set carries
+   #0052FD. This surface is the blossom set, so the NS accent must be absent.
+
+   #4392E6 measures 3.23:1 on white and 5.30:1 on this console's field. It is a
+   MARK AND LARGE-TEXT COLOUR ONLY and must never land on body-sized text.
+   Source: NorthSchema Brand, re-sampled 2026-09-02, and confirmed here by
+   sampling NorthSchema_Opt-02_Transparent.png directly.
+
+   Provenance for every value below, so none of it reads as invented:
+   - brand blue, ink, paper, muted        NorthSchema Brand
+   - near-black WITH A TINT, not pure     Interface Standard section 3, pattern 1
+   - verdict triple on a dark field       northschema-design, dark-field values
+   - one accent spent once                Interface Standard section 3, pattern 1
+
+   The verdict colours are functional, not brand, and never appear without an
+   icon and a text label.
+   --------------------------------------------------------------------------- */
+
+:root {
+  /* Brand primitives */
+  --ns-blue: #4392e6;
+  --ns-ink: #161c24;
+  --ns-paper: #e7edf3;
+  --ns-muted: #8c97a4;
+
+  /* Console field. Near-black carrying a blue tint rather than pure black. */
+  --pc-canvas: #0e1116;
+  --pc-surface: #141920;
+  --pc-raised: #1a212a;
+  --pc-line: #29323d;
+  --pc-line-strong: #3a4552;
+
+  /* Text ladder. Every value is asserted against --pc-canvas in the guard. */
+  --pc-text: #e7edf3;
+  --pc-text-dim: #a9b3bf;
+  --pc-text-faint: #8c97a4;
+
+  /* Verdicts. Functional, dark field only, never colour alone. */
+  --pc-allow: #3ed598;
+  --pc-block: #ff5e64;
+  --pc-skip: #8c97a4;
+
+  /* The blossom mark turns to mush below this, because the negative space
+     between its petals closes. Measured 2026-09-02. Declared as a token so no
+     component can quietly pick a smaller number, and asserted in palette.test.js.
+     Anything smaller uses the wordmark alone or the NS monogram set, and the
+     two sets are never mixed on one surface. */
+  --pc-mark-min-px: 96;
+}

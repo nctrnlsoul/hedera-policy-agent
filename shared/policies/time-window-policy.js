@@ -1,9 +1,11 @@
 import { AbstractPolicy } from "@hashgraph/hedera-agent-kit";
 
 import { GOVERNED_TOOLS } from "./governed-tools.js";
+import { evaluateTimeWindow } from "./time-rule.js";
 
-const ALLOWED_START_HOUR_UTC = 9;
-const ALLOWED_END_HOUR_UTC = 17;
+// Re-exported so callers and tests have one import path for the rule and the
+// policy that applies it.
+export { evaluateTimeWindow };
 
 export class TimeWindowPolicy extends AbstractPolicy {
   name = "Business Hours Only";
@@ -14,7 +16,6 @@ export class TimeWindowPolicy extends AbstractPolicy {
   // applies identically to HBAR, tokens and allowance grants. Revocation is not
   // reachable from this list at all: see governed-tools.js.
   shouldBlockPreToolExecution(_params, _method) {
-    const currentHour = new Date().getUTCHours();
-    return currentHour < ALLOWED_START_HOUR_UTC || currentHour >= ALLOWED_END_HOUR_UTC;
+    return evaluateTimeWindow(new Date().getUTCHours()).decision === "DENY";
   }
 }

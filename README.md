@@ -131,9 +131,9 @@ instead of executing. A call to any of the other 23 tools never reaches a hook.
 npm test
 ```
 
-409 tests across 16 files. 223 of those cover the size policy's decision surface directly, including every fail-closed path listed above, the revocation carve-outs, and a check that every tool the policy claims to govern actually has a rule behind it.
+500 tests across 18 files. 268 of those cover the size policy's decision surface directly, including every fail-closed path listed above, the revocation carve-outs, and a check that every tool the policy claims to govern actually has a rule behind it.
 
-One caveat worth knowing: three tests in `web/src/features/chat/extension/registry.test.js` assert a development-only `console.warn`, so they fail if `NODE_ENV=production` is set in your shell. Unset it, or set it to `development`, before running the suite.
+The suite passes under any `NODE_ENV`. Tests that assert development-only behavior pin the variable themselves rather than inheriting it from the shell.
 
 ---
 

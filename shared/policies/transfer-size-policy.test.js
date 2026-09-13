@@ -593,3 +593,71 @@ describe("widened coverage", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The object-carrier branch of toFiniteNumber.
+//
+// Found 2026-09-13 by mutation, not by reading: changing that branch to return
+// 0 instead of null survived all 455 tests. The source comment asserts the
+// behaviour ("skipping is what let an unparseable amount contribute zero to the
+// total") and nothing proved it. A zero is SKIPPED on the HBAR path rather than
+// denied, so a malformed object amount beside real credits under-counts the
+// total, which is the original fail-open bug in one surviving branch.
+//
+// Rule 91b: a test named after a bug that has been green since birth is an
+// untested test. These were red-proved against that mutation before landing.
+// ---------------------------------------------------------------------------
+
+const CARRIERS = [
+  ["a bare object with no bridge", {}],
+  ["an object carrying unrelated keys", { value: 5, unit: "hbar" }],
+  ["toNumber that is not a function", { toNumber: 5 }],
+  ["toNumber that throws", { toNumber() { throw new Error("nope"); } }],
+  ["toNumber returning a string", { toNumber: () => "5" }],
+  ["toNumber returning NaN", { toNumber: () => NaN }],
+  ["toNumber returning Infinity", { toNumber: () => Infinity }],
+  ["toBigNumber returning a bridgeless object", { toBigNumber: () => ({}) }],
+  ["toBigNumber that throws", { toBigNumber() { throw new Error("nope"); } }],
+  ["an array", []],
+  ["a Date", new Date()],
+];
+
+describe("an amount this rule cannot bridge to a number is denied, never skipped", () => {
+  let policy;
+  let warnSpy;
+
+  beforeEach(() => {
+    policy = new TransferSizeLimitPolicy();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  it.each(CARRIERS)("HBAR: blocks %s", (_label, amount) => {
+    expect(policy.shouldBlockPostParamsNormalization(hbarParams([{ amount }]), HBAR_TOOL)).toBe(true);
+  });
+
+  // The case that actually loses money: one real credit beside one carrier the
+  // rule cannot read. Skipping the unreadable one hides part of the total.
+  it.each(CARRIERS)("HBAR: blocks a real credit sitting beside %s", (_label, amount) => {
+    const params = hbarParams([{ amount: 5 }, { amount }]);
+    expect(policy.shouldBlockPostParamsNormalization(params, HBAR_TOOL)).toBe(true);
+  });
+
+  it.each(CARRIERS)("token airdrop: blocks %s", (_label, amount) => {
+    expect(policy.shouldBlockPostParamsNormalization(tokenParams([{ amount }]), TOKEN_TOOL)).toBe(true);
+  });
+
+  it.each(CARRIERS)("HBAR allowance: blocks %s", (_label, amount) => {
+    expect(policy.shouldBlockPostParamsNormalization(approveHbarParams(amount), APPROVE_HBAR_TOOL)).toBe(true);
+  });
+
+  it("names the unparseable field rather than reporting a generic block", () => {
+    const { decision, reason } = evaluateTransferSize(hbarParams([{ amount: {} }]), HBAR_TOOL);
+    expect(decision).toBe("DENY");
+    expect(reason).toContain("hbarTransfers[0].amount");
+    expect(reason).toMatch(/parse/i);
+  });
+});
