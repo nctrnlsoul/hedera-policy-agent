@@ -71,6 +71,14 @@ describe("shared/config", () => {
   });
 
   it("should accept an ED25519 operator key in DER format", async () => {
+    // Throwaway fixtures, not real credentials. Both were flagged by a secret
+    // scan on 2026-09-13 because they are well-formed keys in a public repo,
+    // then cleared: their public keys were derived locally and looked up on
+    // HashScan, and no account on testnet or mainnet holds either one.
+    //   ed25519 pub e0c8ec2758a5879ffac226a13c0c516b799e72e35141a0dd828f94d37988a4b7
+    //   ecdsa   pub 02bb50e2d89a4ed70663d080659fe0ad4b9bc3e06c17a227433966cb59ceee020d
+    // Recorded here so the next scan resolves this in seconds instead of
+    // re-raising it. Never put a funded key in this file.
     const ed25519DerKey =
       "302e020100300506032b657004220420" +
       "db484b828e64b2d8f12ce3c0a0e93a0b8cce7af1bb8f39c97732394482538e10";

@@ -1,9 +1,6 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-import { readEnv } from "@/features/chat-hedera/server";
-import { AppProviders } from "./providers";
-
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -15,26 +12,28 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: "Hedera Agent Chat",
-  description: "Chat with a Hedera agent scaffolded by create-hedera-agent.",
+  title: "Hedera Policy Agent",
+  description:
+    "Runtime policy enforcement for a Hedera agent. Watch the rules allow and block real tool calls, with no keys and no network.",
 };
 
+// THE OPERATOR KEY IS DELIBERATELY NOT READ HERE.
+//
+// It used to be. `readEnv()` ran in this file and the private key was
+// serialized into the initial HTML of EVERY route so the browser-side wallet
+// simulator could sign. That is the scaffold's design and it is demo-safe on a
+// throwaway testnet account, but it means the key reaches any visitor who views
+// source, on any page, including pages that have nothing to do with signing.
+//
+// It now lives in `chat/layout.jsx`, which wraps only the routes that actually
+// sign something. Structuring it this way rather than remembering to avoid it
+// means the keyless path is the DEFAULT path: a route added tomorrow inherits
+// no key unless someone deliberately puts it under /chat.
 export default function RootLayout({ children }) {
-  // Read the operator key server-side and pass it to the browser-side wallet
-  // simulator. The key is intentionally serialized into the initial HTML.
-  // That's the "simulation" part. A real wallet holds its own key and the
-  // server never sees it; swapping <ChatWalletProvider> for a wallet SDK is
-  // the upgrade path.
-  const { operatorId, operatorKey } = readEnv();
-
   return (
     <html lang="en">
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <AppProviders accountId={operatorId} signingKey={operatorKey}>
-          {children}
-        </AppProviders>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        {children}
       </body>
     </html>
   );
