@@ -47,6 +47,7 @@ export function ChatHederaToolCard({
       transactionId={outcome.transactionId}
       status={outcome.status}
       errorMessage={outcome.errorMessage}
+      denial={outcome.denial}
       unsignedBytes={outcome.unsignedBytes}
     />
   );

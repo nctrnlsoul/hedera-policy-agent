@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Loader2,
   ShieldCheck,
+  ShieldX,
   XCircle,
 } from "lucide-react";
 
@@ -36,6 +37,19 @@ export function stateBadgeAppearance(state, status) {
         className:
           "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
       };
+    case "blocked":
+      // A guardrail firing is not an error, so it does not borrow the red
+      // `destructive` treatment used for a network or SDK failure. It is a
+      // deliberate refusal, and ShieldX says that where XCircle says "broken".
+      //
+      // Colour is the LIGHT-FIELD block token. The dark-field verdict colours
+      // used on the /policy console measure 1.88:1 and 2.98:1 on white and are
+      // illegal here; #C42B21 is the documented light-field equivalent.
+      return {
+        icon: React.createElement(ShieldX, { className: "size-3" }),
+        label: "Blocked by policy",
+        className: "bg-[#C42B21]/10 text-[#C42B21] dark:bg-[#C42B21]/20 dark:text-[#FF8A80]",
+      };
     case "failed":
       return {
         icon: React.createElement(XCircle, { className: "size-3" }),
@@ -62,6 +76,8 @@ export function stateBorderClass(state) {
       return "border-l-blue-500";
     case "confirmed":
       return "border-l-emerald-500";
+    case "blocked":
+      return "border-l-[#C42B21]";
     case "failed":
       return "border-l-destructive";
     case "network-error":

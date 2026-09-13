@@ -6,6 +6,7 @@ import {
   evaluateTransferSize,
 } from "./transfer-size-policy.js";
 import { TimeWindowPolicy } from "./time-window-policy.js";
+import { parsePolicyDenial } from "./denial.js";
 
 const HBAR_TOOL = "transfer_hbar_tool";
 const TOKEN_TOOL = "airdrop_fungible_token_tool";
@@ -256,17 +257,61 @@ describe("TransferSizeLimitPolicy", () => {
   // The boolean return only matters because of what the kit does with it. These
   // drive the kit's own AbstractPolicy wrapper, so they prove a DENY actually
   // stops the tool call rather than merely returning true.
+  //
+  // They now also pin the REASON. The previous assertions matched the kit's
+  // generic `blocked by policy: <name>`, which never says why, and that message
+  // is precisely what this policy replaces.
   describe("integrates with the kit's AbstractPolicy hook contract", () => {
-    it("throws a policy-block error through the kit hook on unparseable input", async () => {
-      await expect(
-        policy.postParamsNormalizationHook(hbarParams([{ amount: "abc" }]), HBAR_TOOL),
-      ).rejects.toThrow(/blocked by policy: Per-Transfer Size Limit/);
+    it("carries the parse-failure reason, not just the policy name", async () => {
+      const thrown = await policy
+        .postParamsNormalizationHook(hbarParams([{ amount: "abc" }]), HBAR_TOOL)
+        .then(() => null, (error) => error);
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect(parsePolicyDenial(thrown.message)).toEqual({
+        policy: "Per-Transfer Size Limit",
+        stage: "post-params-normalization",
+        reason: "hbarTransfers[0].amount could not be parsed as a number",
+        method: HBAR_TOOL,
+      });
     });
 
-    it("throws a policy-block error through the kit hook on missing keys", async () => {
-      await expect(
-        policy.postParamsNormalizationHook({}, TOKEN_TOOL),
-      ).rejects.toThrow(/blocked by policy: Per-Transfer Size Limit/);
+    it("carries the missing-keys reason", async () => {
+      const thrown = await policy
+        .postParamsNormalizationHook({}, TOKEN_TOOL)
+        .then(() => null, (error) => error);
+
+      const parsed = parsePolicyDenial(thrown.message);
+      expect(parsed.policy).toBe("Per-Transfer Size Limit");
+      expect(parsed.reason).toMatch(/rawParams/);
+      expect(parsed.method).toBe(TOKEN_TOOL);
+    });
+
+    // The over-limit case is the one a person actually hits, and the whole
+    // point of the change: the numbers have to reach the reader.
+    it("names both numbers when a transfer is over the limit", async () => {
+      const thrown = await policy
+        .postParamsNormalizationHook(hbarParams(hbarTransfers(50)), HBAR_TOOL)
+        .then(() => null, (error) => error);
+
+      const { reason } = parsePolicyDenial(thrown.message);
+      expect(reason).toContain("50");
+      expect(reason).toContain("10");
+    });
+
+    // Pins the kit behaviour this design depends on. If an upgrade stops
+    // catching hook errors or stops appending `error.message`, this is the test
+    // that says so instead of the UI quietly going blank.
+    it("puts the reason where the kit's own error handler will find it", async () => {
+      const thrown = await policy
+        .postParamsNormalizationHook(hbarParams(hbarTransfers(50)), HBAR_TOOL)
+        .then(() => null, (error) => error);
+
+      // Exactly what BaseTool.handleError does with it.
+      const kitResult = {
+        raw: { error: `Failed to execute transfer_hbar_tool: ${thrown.message}` },
+      };
+      expect(parsePolicyDenial(kitResult)).not.toBeNull();
     });
 
     it("does not throw through the kit hook for a transfer within the limit", async () => {

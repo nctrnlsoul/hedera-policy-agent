@@ -48,8 +48,23 @@ export function useChatAgent({
     [id],
   );
 
+  // `react-hooks/refs` flags the construction below as reading a ref during
+  // render. It is a FALSE POSITIVE, and the disable is deliberate rather than
+  // convenient.
+  //
+  // The rule sees a ref read inside a function created during render and cannot
+  // prove the function is not also CALLED during that render. It is not.
+  // Verified by reading the installed `ai` package rather than its docs:
+  // `HttpChatTransport`'s constructor only stores the callback
+  // (`this.prepareSendMessagesRequest = prepareSendMessagesRequest;`) and
+  // invokes it from `async sendMessages(...)`, which runs when a message is
+  // actually sent. Source: node_modules/ai/dist/index.js.
+  //
+  // Re-verify on any `ai` upgrade, because the fact that makes this disable
+  // correct lives in someone else's code.
   const transport = React.useMemo(
     () =>
+      // eslint-disable-next-line react-hooks/refs
       new DefaultChatTransport({
         api,
         prepareSendMessagesRequest: ({ messages, body }) => {

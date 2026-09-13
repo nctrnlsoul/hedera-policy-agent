@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { stateBorderClass } from "@/features/chat-hedera/utils/transaction-card-state";
 import { summarize } from "@/features/chat-hedera/utils/transaction-summaries";
 
+import { ChatHederaPolicyVerdict } from "./ChatHederaPolicyVerdict";
 import { ChatHederaTransactionCardActions } from "./ChatHederaTransactionCardActions";
 import { ChatHederaTransactionCardDetails } from "./ChatHederaTransactionCardDetails";
 import { ChatHederaTransactionCardHeader } from "./ChatHederaTransactionCardHeader";
@@ -21,6 +22,7 @@ export function ChatHederaTransactionCard({
   transactionId,
   status,
   errorMessage,
+  denial,
   unsignedBytes,
   onRetry,
   className,
@@ -49,8 +51,12 @@ export function ChatHederaTransactionCard({
         state={state}
         network={network}
         transactionId={transactionId}
-        errorMessage={errorMessage}
+        errorMessage={state === "blocked" ? undefined : errorMessage}
       />
+      {/* The reason gets the verdict treatment instead of the generic error
+          line, so a refusal reads as the guardrail working rather than as
+          something that went wrong. */}
+      {state === "blocked" ? <ChatHederaPolicyVerdict denial={denial} /> : null}
       {state === "awaiting-approval" && toolCallId ? (
         <ChatHederaTransactionCardActions
           toolName={toolName}

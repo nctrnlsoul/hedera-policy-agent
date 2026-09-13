@@ -53,67 +53,98 @@ export function createHederaToolkit({ mode }) {
     },
   });
   return {
-    tools: baseToolkit.getTools(),
+    // Wrapped with no transform, so every result passes through byte-identically
+    // and this mode behaves exactly as it did before. The wrapper is here for
+    // what comes next: a policy denial in `auto` had nowhere to be caught, and
+    // `auto` is the mode the deployed demo runs in.
+    tools: wrapMutatingTools(baseToolkit.getTools(), mutatingToolMethods),
     mutatingToolMethods,
   };
 }
 
-// Wraps every mutating tool so the kit's RETURN_BYTES output (a `{ bytes }`
-// object) is repackaged into the AWAITING_APPROVAL envelope the client expects.
-// Read-only tools pass through unchanged. Their outputs are tool results, not
-// transactions, regardless of mode.
-function wrapMutatingToolsForApproval(baseTools, mutating) {
+// Wraps every mutating tool with a single seam. Read-only tools pass through
+// BY REFERENCE, not by copy, because their outputs are tool results rather than
+// transactions in any mode, and a copy would silently drop a property this
+// wrapper does not know about.
+//
+// The seam exists so a policy denial has somewhere to be caught. The kit's
+// `AbstractPolicy` contract returns a bare boolean, so the reason a policy gave
+// is computed and then thrown away before anything can display it. Catching
+// needs a wrapper, and until now only `human` mode had one, which is the wrong
+// half: `auto` is the mode the deployed demo runs in.
+//
+// This slice adds the wrapper to both modes and NOTHING ELSE. With no
+// `transformResult` supplied the result is returned byte-identically, which is
+// the contract its tests assert.
+export function wrapMutatingTools(baseTools, mutating, options = {}) {
+  const { transformResult, toModelOutput } = options;
   const wrapped = {};
+
   for (const [name, baseTool] of Object.entries(baseTools)) {
     if (!mutating.has(name)) {
       wrapped[name] = baseTool;
       continue;
     }
-    wrapped[name] = tool({
+
+    const config = {
       description: baseTool.description,
       inputSchema: baseTool.inputSchema,
-      execute: async (input, options) => {
+      execute: async (input, executeOptions) => {
         if (typeof baseTool.execute !== "function") {
           throw new Error(`Tool "${name}" has no execute method`);
         }
-        const result = await baseTool.execute(input, options);
-        const unsignedBytes = extractBytesAsBase64(result);
-        if (!unsignedBytes) {
-          // The kit didn't return bytes (e.g. a validation error fell through).
-          // Pass the original tool output back so the agent loop can react.
-          return result;
-        }
-        const payload = {
-          raw: {
-            status: AWAITING_APPROVAL_STATUS,
-            toolName: name,
-            input,
-            summary: summarize(name, input),
-            unsignedBytes,
-          },
-          humanMessage:
-            "Awaiting user approval. The user must sign the transaction externally and submit the signed bytes. Do not call any further tools.",
-        };
-        return JSON.stringify(payload);
+        const result = await baseTool.execute(input, executeOptions);
+        if (!transformResult) return result;
+        return transformResult({ name, input, result });
       },
-      // The bytes are a client-only affordance: the transaction card renders
-      // them, the model has no reason to read or repeat them. Forking the
-      // model-visible output here scrubs them out so the LLM doesn't echo the
-      // base64 into its reply text. The rest of the envelope (status, tool
-      // name, input, summary) is still visible so the model can acknowledge.
-      toModelOutput: ({ output }) => {
-        const parsed = parseToolOutputForModel(output);
-        const value =
-          parsed !== null
-            ? JSON.stringify(parsed)
-            : typeof output === "string"
-              ? output
-              : JSON.stringify(output);
-        return { type: "text", value };
-      },
-    });
+    };
+    if (toModelOutput) config.toModelOutput = toModelOutput;
+
+    wrapped[name] = tool(config);
   }
+
   return wrapped;
+}
+
+// Repackages the kit's RETURN_BYTES output (a `{ bytes }` object) into the
+// AWAITING_APPROVAL envelope the client expects.
+function wrapMutatingToolsForApproval(baseTools, mutating) {
+  return wrapMutatingTools(baseTools, mutating, {
+    transformResult: async ({ name, input, result }) => {
+      const unsignedBytes = extractBytesAsBase64(result);
+      if (!unsignedBytes) {
+        // The kit didn't return bytes (e.g. a validation error fell through).
+        // Pass the original tool output back so the agent loop can react.
+        return result;
+      }
+      return JSON.stringify({
+        raw: {
+          status: AWAITING_APPROVAL_STATUS,
+          toolName: name,
+          input,
+          summary: summarize(name, input),
+          unsignedBytes,
+        },
+        humanMessage:
+          "Awaiting user approval. The user must sign the transaction externally and submit the signed bytes. Do not call any further tools.",
+      });
+    },
+    // The bytes are a client-only affordance: the transaction card renders
+    // them, the model has no reason to read or repeat them. Forking the
+    // model-visible output here scrubs them out so the LLM doesn't echo the
+    // base64 into its reply text. The rest of the envelope (status, tool
+    // name, input, summary) is still visible so the model can acknowledge.
+    toModelOutput: ({ output }) => {
+      const parsed = parseToolOutputForModel(output);
+      const value =
+        parsed !== null
+          ? JSON.stringify(parsed)
+          : typeof output === "string"
+            ? output
+            : JSON.stringify(output);
+      return { type: "text", value };
+    },
+  });
 }
 
 function extractBytesAsBase64(result) {

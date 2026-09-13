@@ -32,8 +32,17 @@ export function ChatShell({
 
   React.useEffect(() => {
     const hydrate = () => {
-      const chat = loadChat(chatId);
-      setState(chat ? { status: "ready", chat } : { status: "missing" });
+      // If the chat doesn't exist (deleted in another tab, cleared storage),
+      // mint a fresh one under the same id rather than throwing the user back
+      // to root. Preserves bookmarkability while keeping the archive clean.
+      //
+      // Done HERE, in the same pass as the load, rather than in a second
+      // effect keyed on a "missing" status. That shape rendered once with
+      // status "missing", ran an effect, called setState, and rendered again:
+      // a cascading render that `react-hooks/set-state-in-effect` correctly
+      // flagged. There is now no intermediate state to cascade from.
+      const chat = loadChat(chatId) ?? createChat({ id: chatId });
+      setState({ status: "ready", chat });
     };
     hydrate();
     // Re-hydrate when the active chat is mutated from elsewhere (e.g. the
@@ -54,12 +63,7 @@ export function ChatShell({
 
   // If the chat doesn't exist (deleted in another tab, cleared storage), recover
   // by minting a fresh chat under the same id rather than throwing the user
-  // back to root — preserves bookmarkability while keeping the archive clean.
-  React.useEffect(() => {
-    if (state.status !== "missing") return;
-    const chat = createChat({ id: chatId });
-    setState({ status: "ready", chat });
-  }, [state.status, chatId]);
+  // back to root. Handled inside `hydrate` above, not in a separate effect.
 
   return (
     <div className="flex h-dvh">
