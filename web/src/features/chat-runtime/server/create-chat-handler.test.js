@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { createChatHandler } from "./create-chat-handler";
+import { BOUNDS } from "./request-bounds.js";
 
 const streamTextMock = vi.fn();
 vi.mock("ai", async () => {
@@ -138,6 +139,98 @@ describe("createChatHandler", () => {
     const body = await res.json();
     expect(body.error).toMatch(/messages/);
     expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  // These two are the whole point of the bounds work: /api/chat is
+  // unauthenticated, so an uncapped response and a hung upstream call are both
+  // somebody else's bill. Both survived a mutation run until these existed.
+  it("caps the output tokens on every model call", async () => {
+    streamTextMock.mockReturnValue({
+      toUIMessageStreamResponse: () => new Response("ok"),
+    });
+    const handler = createChatHandler({
+      llm: fakeLLM,
+      getTools: buildToolsetProvider(),
+      getSystemPrompt: () => "p",
+    });
+
+    await handler(buildRequest({ messages: [{ role: "user", parts: [] }] }));
+
+    const call = streamTextMock.mock.calls[0][0];
+    expect(call.maxOutputTokens).toBe(BOUNDS.maxOutputTokens);
+  });
+
+  it("passes an abort signal so a hung call cannot run unbounded", async () => {
+    streamTextMock.mockReturnValue({
+      toUIMessageStreamResponse: () => new Response("ok"),
+    });
+    const handler = createChatHandler({
+      llm: fakeLLM,
+      getTools: buildToolsetProvider(),
+      getSystemPrompt: () => "p",
+    });
+
+    await handler(buildRequest({ messages: [{ role: "user", parts: [] }] }));
+
+    const call = streamTextMock.mock.calls[0][0];
+    expect(call.abortSignal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("rejects an oversized body before the model is reached", async () => {
+    const handler = createChatHandler({
+      llm: fakeLLM,
+      getTools: buildToolsetProvider(),
+      getSystemPrompt: () => "p",
+    });
+
+    const huge = { messages: [{ role: "user", text: "x".repeat(BOUNDS.maxBodyBytes + 10) }] };
+    const res = await handler(buildRequest(huge));
+
+    expect(res.status).toBe(400);
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  // The route-level assertion. The limiter's own tests prove it says no; these
+  // prove the ROUTE acts on that answer. Deleting the 429 branch left every
+  // test green until this existed.
+  it("returns 429 and never reads the body once the limiter says no", async () => {
+    const handler = createChatHandler({
+      llm: fakeLLM,
+      getTools: buildToolsetProvider(),
+      getSystemPrompt: () => "p",
+      rateLimiter: { check: () => ({ ok: false, reason: "key", retryAfterMs: 4200 }) },
+    });
+
+    const res = await handler(buildRequest({ messages: [{ role: "user", parts: [] }] }));
+
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBe("5");
+    expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  it("does not echo the limiter's internals to the caller", async () => {
+    const handler = createChatHandler({
+      llm: fakeLLM,
+      getTools: buildToolsetProvider(),
+      getSystemPrompt: () => "p",
+      rateLimiter: { check: () => ({ ok: false, reason: "global", retryAfterMs: 1 }) },
+    });
+
+    const body = await (await handler(buildRequest({ messages: [] }))).json();
+    expect(JSON.stringify(body)).not.toContain("global");
+  });
+
+  it("proceeds normally when the limiter allows", async () => {
+    streamTextMock.mockReturnValue({ toUIMessageStreamResponse: () => new Response("ok") });
+    const handler = createChatHandler({
+      llm: fakeLLM,
+      getTools: buildToolsetProvider(),
+      getSystemPrompt: () => "p",
+      rateLimiter: { check: () => ({ ok: true }) },
+    });
+
+    await handler(buildRequest({ messages: [{ role: "user", parts: [] }] }));
+    expect(streamTextMock).toHaveBeenCalledTimes(1);
   });
 
   it("should propagate provider errors so the route can translate them", async () => {
