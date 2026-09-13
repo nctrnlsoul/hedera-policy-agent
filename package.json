@@ -10,6 +10,7 @@
     "vercel-build": "next build web",
     "test": "vitest run",
     "test:watch": "vitest",
+    "coverage": "node scripts/tool-coverage.mjs",
     "lint": "eslint .",
     "cli": "node cli/index.js"
   },
