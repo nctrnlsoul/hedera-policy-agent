@@ -10,33 +10,40 @@ An AI agent that makes payments on Hedera and enforces runtime policies (Hedera 
 
 A natural-language agent for the Hedera network. It can send HBAR, create and mint tokens, airdrop tokens, manage allowances and query balances.
 
-Two policy hooks sit in front of two of those tools. When a policy blocks, the transaction never executes and the agent surfaces a clear reason.
+Two policy hooks sit in front of every fungible value path: HBAR transfers, HBAR transfers spent against an allowance, fungible-token airdrops, fungible-token transfers spent against an allowance, and the two tools that grant HBAR and fungible-token allowances in the first place. When a policy blocks, the transaction never executes and the agent surfaces a clear reason.
 
-Both policies govern **HBAR transfers and fungible-token airdrops**, including stablecoins such as Circle's USDC on testnet. The size limit enforces a separate per-asset threshold for each, so 10 HBAR and 10 USDC are checked independently.
+The size limit enforces a separate per-asset threshold for HBAR and for tokens, including stablecoins such as Circle's USDC on testnet, so 10 HBAR and 10 USDC are checked independently.
 
 - Built on the [Hedera Agent Kit](https://github.com/hashgraph/hedera-agent-kit-js) (v4).
 - Runs on Hedera **testnet** out of the box.
 - Web UI powered by Next.js with an LLM (OpenAI or Anthropic) driving tool calls.
 
-**Read [Coverage and limits](#coverage-and-limits) before trusting the policy layer with anything.** Two of this agent's 29 tools are governed. The other 27 are not.
+**Read [Coverage and limits](#coverage-and-limits) before trusting the policy layer with anything.** Six of this agent's 29 tools are governed. The other 23 are not.
 
 ---
 
 ## Coverage and limits
 
-The five core plugins wired in [`shared/config.js`](shared/config.js) expose **29 tools**. The two policies govern **2** of them:
+The five core plugins wired in [`shared/config.js`](shared/config.js) expose **29 tools**. Both policies govern the same **6**, listed once in [`shared/policies/governed-tools.js`](shared/policies/governed-tools.js) and imported by each, so the two cannot drift apart:
 
 - `transfer_hbar_tool`
-- `airdrop_fungible_token_tool`
-
-Every other tool reaches the network without passing a policy. **Four of the ungoverned tools move value:**
-
 - `transfer_hbar_with_allowance_tool`
+- `airdrop_fungible_token_tool`
 - `transfer_fungible_token_with_allowance_tool`
-- `transfer_non_fungible_token_tool`
-- `transfer_non_fungible_token_with_allowance_tool`
+- `approve_hbar_allowance_tool`
+- `approve_token_allowance_tool`
 
-Tools that grant spending authority are ungoverned too, including `approve_hbar_allowance_tool`, `approve_token_allowance_tool` and `approve_nft_allowance_tool`, as are `create_account_tool`, `delete_account_tool`, `mint_fungible_token_tool` and `update_token_tool`.
+That is every fungible value path the agent exposes, plus the two tools that hand out fungible spending authority. Governing transfers while leaving the grants open is the hole worth naming: an ungoverned `approve_*_allowance` lets a spender move funds later, repeatedly, outside the time window, without another tool call the policy layer can see.
+
+**Deliberately never governed.** The three tools that revoke authority stay open at any hour and any size:
+
+- `delete_hbar_allowance_tool`
+- `delete_token_allowance_tool`
+- `delete_non_fungible_token_allowance_tool`
+
+A guardrail that can block the cancel is worse than no guardrail. If an allowance is compromised at 3am, pulling it back must not depend on a business-hours window. This is a decision, not an oversight, and there is a test asserting the absence.
+
+**Not yet governed.** The NFT paths, `transfer_non_fungible_token_tool`, `transfer_non_fungible_token_with_allowance_tool` and `approve_nft_allowance_tool`, move a serial number rather than an amount, so a per-asset size limit is the wrong rule shape. They need their own policy rather than a bad branch in this one. Also ungoverned: `create_account_tool`, `delete_account_tool`, `mint_fungible_token_tool`, `update_token_tool` and `sign_schedule_transaction_tool`.
 
 Regenerate the full list at any time:
 
@@ -46,9 +53,9 @@ npm run coverage
 
 That script reads the governed tool names off the policy classes themselves, so it cannot drift from the code it audits.
 
-**What this is:** a working demonstration of the Agent Kit hook mechanism, enforced end to end on two tool paths and verified on live testnet for both, with dual-asset (HBAR and fungible token) enforcement through a single gate.
+**What this is:** a policy layer that holds across every fungible transfer and allowance grant the agent can make, fails closed on input it cannot parse, and states its own boundary.
 
-**What it is not:** a complete spend guard for a Hedera agent. Widening the surface means adding tool names to each policy's `relevantTools` plus a matching branch in the size rule, not new architecture. The narrow scope was a Week 5 bounty decision, and it is stated here rather than implied.
+**What it is not:** complete coverage of all 29 tools. The gaps above are named rather than implied, and each is a stated decision with a reason.
 
 ---
 
@@ -56,7 +63,7 @@ That script reads the governed tool names off the policy classes themselves, so 
 
 Both policies extend `AbstractPolicy` from `@hashgraph/hedera-agent-kit` and are registered in the `hooks` array of [`shared/config.js`](shared/config.js). They are the core of this submission.
 
-Each policy's `relevantTools` field lists `transfer_hbar_tool` **and** `airdrop_fungible_token_tool`, so both HBAR sends and fungible-token airdrops pass through the same gates.
+Each policy's `relevantTools` is the shared `GOVERNED_TOOLS` list, so both gates cover exactly the same six tools. A test asserts the two lists are equal, because a tool governed by one policy and not the other is a gap nothing else would report.
 
 ### 1. Business Hours Only, `shared/policies/time-window-policy.js`
 
@@ -82,10 +89,13 @@ const MAX_HBAR_PER_TRANSFER  = 10;  // HBAR
 const MAX_TOKEN_PER_TRANSFER = 10;  // token display units (e.g. USDC)
 ```
 
-- **HBAR path** sums the positive (credit) entries in `normalisedParams.hbarTransfers`, mirroring the amount handling of the kit's built-in `MaxRecipientsPolicy` (tolerates `Hbar`, `BigNumber`, number or string).
-- **Token path** sums `rawParams.recipients[].amount` directly. The kit's `AirdropRecipientSchema` documents this field as *"Amount in display units, the tool will handle parsing"*, so the comparison happens in the same units as the limit constant. No decimals lookup, no network round trip required.
+- **HBAR paths** sum the positive (credit) entries in `normalisedParams.hbarTransfers`, mirroring the amount handling of the kit's built-in `MaxRecipientsPolicy` (tolerates `Hbar`, `BigNumber`, number or string). The kit defines `transferHbarWithAllowanceParameters` **as** `transferHbarParameters`, and both normalise to the same array, so the allowance variant runs the same rule rather than an approximation of it.
+- **Token transfer paths** sum `rawParams.recipients[].amount` for the airdrop and `rawParams.transfers[].amount` for the allowance transfer. The kit documents both as display units (*"Amount in display units, the tool will handle parsing"* and *"Amount of tokens to transfer in display unit"*), so the comparison happens in the same units as the limit constant. No decimals lookup, no network round trip required. Each carries a single `tokenId`, so the amounts are summed.
+- **Allowance grants** read `rawParams.amount` for HBAR and `rawParams.tokenApprovals[]` for tokens, both documented as display units. Token approvals are checked **per entry, not summed**, because each entry carries its own `tokenId`: a 10 cap on token A beside a 10 cap on token B is two separate caps, not a 20 cap on the pair.
 
-**It fails closed.** Every input shape the rule cannot turn into a number it is willing to compare returns a block, with the reason logged: missing hook parameters, a missing or non-array transfer list, an empty list, a non-object entry, a missing amount, an unparseable amount, a non-positive airdrop amount, and any tool added to `relevantTools` that has no branch in the rule. A size limit that waves through input it failed to parse reports a guardrail that is not there, and an attacker only has to malform the one field the check reads.
+**Zero is a revocation, and a revocation is never blocked.** Setting an allowance to zero is how an allowance is cancelled, so `approve_hbar_allowance` and `approve_token_allowance` allow `0` explicitly and say so in the logged reason. Negative amounts are still denied. The same instinct is why the three `delete_*_allowance` tools are ungoverned entirely.
+
+**It fails closed.** Every input shape the rule cannot turn into a number it is willing to compare returns a block, with the reason logged: missing hook parameters, a missing or non-array list, an empty list, a non-object entry, a missing amount, an unparseable amount, a non-positive transfer amount, a negative allowance, and any tool added to `GOVERNED_TOOLS` that has no branch in the rule. A size limit that waves through input it failed to parse reports a guardrail that is not there, and an attacker only has to malform the one field the check reads.
 
 The decision function is exported as `evaluateTransferSize` so the fail-closed behaviour can be asserted directly, including the reason, which the boolean hook contract has no room to carry.
 
@@ -107,11 +117,11 @@ pre-tool-execution   post-params-norm   (other stages)
    └── time window ────┴── size limit
 ```
 
-A call to `transfer_hbar_tool` or `airdrop_fungible_token_tool` passes through the registered hooks. If a policy's `shouldBlock…` method returns `true`, the kit throws and the agent reports:
+A call to any of the six governed tools passes through the registered hooks. If a policy's `shouldBlock…` method returns `true`, the kit throws and the agent reports:
 
 > *Action \<tool\> blocked by policy: \<policy name\> (\<description\>)*
 
-instead of executing. A call to any of the other 27 tools never reaches a hook.
+instead of executing. A call to any of the other 23 tools never reaches a hook.
 
 ---
 
@@ -121,7 +131,7 @@ instead of executing. A call to any of the other 27 tools never reaches a hook.
 npm test
 ```
 
-349 tests across 16 files. 163 of those cover the size policy's decision surface directly, including every fail-closed path listed above.
+409 tests across 16 files. 223 of those cover the size policy's decision surface directly, including every fail-closed path listed above, the revocation carve-outs, and a check that every tool the policy claims to govern actually has a rule behind it.
 
 One caveat worth knowing: three tests in `web/src/features/chat/extension/registry.test.js` assert a development-only `console.warn`, so they fail if `NODE_ENV=production` is set in your shell. Unset it, or set it to `development`, before running the suite.
 

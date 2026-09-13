@@ -5,6 +5,7 @@ import {
   TransferSizeLimitPolicy,
   evaluateTransferSize,
 } from "./transfer-size-policy.js";
+import { TimeWindowPolicy } from "./time-window-policy.js";
 
 const HBAR_TOOL = "transfer_hbar_tool";
 const TOKEN_TOOL = "airdrop_fungible_token_tool";
@@ -141,18 +142,18 @@ const MUST_DENY = [
 
 describe("TransferSizeLimitPolicy", () => {
   describe("fails closed on every input it cannot confidently evaluate", () => {
-    it.each(MUST_DENY)("denies — %s", (_label, method, params) => {
+    it.each(MUST_DENY)("denies: %s", (_label, method, params) => {
       expect(policy.shouldBlockPostParamsNormalization(params, method)).toBe(true);
     });
 
-    it.each(MUST_DENY)("gives a reason naming the rule — %s", (_label, method, params) => {
+    it.each(MUST_DENY)("gives a reason naming the rule: %s", (_label, method, params) => {
       const result = evaluateTransferSize(params, method);
       expect(result.decision).toBe("DENY");
       expect(typeof result.reason).toBe("string");
       expect(result.reason.length).toBeGreaterThan(0);
     });
 
-    it("never throws on malformed input — it returns a decision", () => {
+    it("never throws on malformed input, it returns a decision", () => {
       for (const [label, method, params] of MUST_DENY) {
         expect(() => policy.shouldBlockPostParamsNormalization(params, method), label).not.toThrow();
       }
@@ -274,8 +275,321 @@ describe("TransferSizeLimitPolicy", () => {
       ).resolves.toBeUndefined();
     });
 
-    it("stays registered for both governed tools", () => {
-      expect(policy.relevantTools).toEqual(["transfer_hbar_tool", "airdrop_fungible_token_tool"]);
+    it("stays registered for every governed tool, and for nothing else", () => {
+      expect(policy.relevantTools).toEqual([
+        "transfer_hbar_tool",
+        "transfer_hbar_with_allowance_tool",
+        "airdrop_fungible_token_tool",
+        "transfer_fungible_token_with_allowance_tool",
+        "approve_hbar_allowance_tool",
+        "approve_token_allowance_tool",
+      ]);
+    });
+
+    // The revocation path must never be governed. Blocking a cancel is worse
+    // than no guardrail, so this asserts the absence rather than trusting it.
+    it("never governs a tool that revokes an allowance", () => {
+      for (const tool of [
+        "delete_hbar_allowance_tool",
+        "delete_token_allowance_tool",
+        "delete_non_fungible_token_allowance_tool",
+      ]) {
+        expect(policy.relevantTools).not.toContain(tool);
+      }
+    });
+
+    // Every governed name must have a branch. A name with no branch is denied
+    // by the fall-through, which is safe but means the tool is unusable, so it
+    // should fail here rather than in production.
+    it("has a size rule for every tool it claims to govern", () => {
+      for (const tool of policy.relevantTools) {
+        const { reason } = evaluateTransferSize({}, tool);
+        expect(reason).not.toMatch(/has no size rule/);
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four tool paths added when coverage was widened past the original two.
+// ---------------------------------------------------------------------------
+
+const HBAR_ALLOWANCE_TOOL = "transfer_hbar_with_allowance_tool";
+const TOKEN_ALLOWANCE_TOOL = "transfer_fungible_token_with_allowance_tool";
+const APPROVE_HBAR_TOOL = "approve_hbar_allowance_tool";
+const APPROVE_TOKEN_TOOL = "approve_token_allowance_tool";
+
+const tokenTransferParams = (transfers) => ({
+  rawParams: { tokenId: "0.0.9999", sourceAccountId: "0.0.1111", transfers },
+  normalisedParams: { tokenId: "0.0.9999", tokenTransfers: [] },
+});
+
+const approveHbarParams = (amount) => ({
+  rawParams: { spenderAccountId: "0.0.2222", amount },
+  normalisedParams: {},
+});
+
+const approveTokenParams = (tokenApprovals) => ({
+  rawParams: { spenderAccountId: "0.0.2222", tokenApprovals },
+  normalisedParams: {},
+});
+
+describe("widened coverage", () => {
+  let policy;
+  let warnSpy;
+
+  beforeEach(() => {
+    policy = new TransferSizeLimitPolicy();
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  // The kit defines transferHbarWithAllowanceParameters AS transferHbarParameters,
+  // and both normalise to the same hbarTransfers array, so this path must behave
+  // identically to the plain HBAR path rather than merely similarly.
+  describe("transfer_hbar_with_allowance_tool", () => {
+    it("allows a credit under the limit", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(hbarParams(hbarTransfers(5)), HBAR_ALLOWANCE_TOOL),
+      ).toBe(false);
+    });
+
+    it("blocks a credit over the limit", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(hbarParams(hbarTransfers(50)), HBAR_ALLOWANCE_TOOL),
+      ).toBe(true);
+    });
+
+    it("blocks credits that only exceed the limit in aggregate", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(hbarParams(hbarTransfers(6, 6)), HBAR_ALLOWANCE_TOOL),
+      ).toBe(true);
+    });
+
+    it("fails closed on unparseable input", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(hbarParams([{ amount: "abc" }]), HBAR_ALLOWANCE_TOOL),
+      ).toBe(true);
+    });
+
+    it("reaches the same verdict as the plain HBAR tool on every fixture", () => {
+      for (const fixture of [
+        hbarParams(hbarTransfers(5)),
+        hbarParams(hbarTransfers(50)),
+        hbarParams([{ amount: "abc" }]),
+        hbarParams([]),
+        {},
+      ]) {
+        expect(evaluateTransferSize(fixture, HBAR_ALLOWANCE_TOOL)).toEqual(
+          evaluateTransferSize(fixture, HBAR_TOOL),
+        );
+      }
+    });
+  });
+
+  describe("transfer_fungible_token_with_allowance_tool", () => {
+    it("allows a transfer under the limit", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(tokenTransferParams([{ amount: 5 }]), TOKEN_ALLOWANCE_TOOL),
+      ).toBe(false);
+    });
+
+    it("blocks a transfer over the limit", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(tokenTransferParams([{ amount: 50 }]), TOKEN_ALLOWANCE_TOOL),
+      ).toBe(true);
+    });
+
+    // Every amount hangs off one tokenId, so the limit applies to the total.
+    it("sums amounts, because they all draw on one token", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(
+          tokenTransferParams([{ amount: 6 }, { amount: 6 }]),
+          TOKEN_ALLOWANCE_TOOL,
+        ),
+      ).toBe(true);
+    });
+
+    it("reads rawParams.transfers, not the airdrop's recipients key", () => {
+      const { reason } = evaluateTransferSize(
+        { rawParams: { tokenId: "0.0.9999", recipients: [{ amount: 5 }] } },
+        TOKEN_ALLOWANCE_TOOL,
+      );
+      expect(reason).toContain("rawParams.transfers is missing or not an array");
+    });
+
+    const MUST_DENY = [
+      ["rawParams missing", {}],
+      ["transfers null", tokenTransferParams(null)],
+      ["transfers empty", tokenTransferParams([])],
+      ["transfers is a string", tokenTransferParams("5")],
+      ["entry not an object", tokenTransferParams(["5"])],
+      ["amount missing", tokenTransferParams([{ accountId: "0.0.2" }])],
+      ["amount unparseable", tokenTransferParams([{ amount: "abc" }])],
+      ["amount empty string", tokenTransferParams([{ amount: "" }])],
+      ["amount boolean", tokenTransferParams([{ amount: true }])],
+      ["amount NaN", tokenTransferParams([{ amount: NaN }])],
+      ["amount Infinity", tokenTransferParams([{ amount: Infinity }])],
+      ["amount zero", tokenTransferParams([{ amount: 0 }])],
+      ["amount negative", tokenTransferParams([{ amount: -5 }])],
+      ["one good amount beside one unreadable", tokenTransferParams([{ amount: 1 }, { amount: "abc" }])],
+    ];
+
+    it.each(MUST_DENY)("blocks when %s", (_label, params) => {
+      expect(policy.shouldBlockPostParamsNormalization(params, TOKEN_ALLOWANCE_TOOL)).toBe(true);
+    });
+  });
+
+  describe("approve_hbar_allowance_tool", () => {
+    it("allows an allowance under the limit", () => {
+      expect(policy.shouldBlockPostParamsNormalization(approveHbarParams(5), APPROVE_HBAR_TOOL)).toBe(false);
+    });
+
+    it("allows an allowance at exactly the limit", () => {
+      expect(policy.shouldBlockPostParamsNormalization(approveHbarParams(10), APPROVE_HBAR_TOOL)).toBe(false);
+    });
+
+    it("blocks an allowance over the limit", () => {
+      expect(policy.shouldBlockPostParamsNormalization(approveHbarParams(50), APPROVE_HBAR_TOOL)).toBe(true);
+    });
+
+    // The whole point of governing approvals: an ungoverned grant lets a
+    // spender drain later, outside the window, without another tool call.
+    it("blocks an over-limit grant that no transfer policy would ever see", () => {
+      const { decision, reason } = evaluateTransferSize(approveHbarParams(1000), APPROVE_HBAR_TOOL);
+      expect(decision).toBe("DENY");
+      expect(reason).toMatch(/allowance/i);
+    });
+
+    // Zero is how an HBAR allowance is cancelled. A guardrail that blocks the
+    // cancel is worse than no guardrail.
+    it("allows zero, because zero is a revocation", () => {
+      expect(policy.shouldBlockPostParamsNormalization(approveHbarParams(0), APPROVE_HBAR_TOOL)).toBe(false);
+    });
+
+    it("says so in the reason, so a log reader can tell a revocation apart", () => {
+      const { reason } = evaluateTransferSize(approveHbarParams(0), APPROVE_HBAR_TOOL);
+      expect(reason).toMatch(/revocation/i);
+    });
+
+    const MUST_DENY = [
+      ["rawParams missing", {}],
+      ["rawParams null", { rawParams: null }],
+      ["amount missing", { rawParams: { spenderAccountId: "0.0.2222" } }],
+      ["amount unparseable", approveHbarParams("abc")],
+      ["amount empty string", approveHbarParams("")],
+      ["amount boolean", approveHbarParams(true)],
+      ["amount NaN", approveHbarParams(NaN)],
+      ["amount Infinity", approveHbarParams(Infinity)],
+      ["amount negative", approveHbarParams(-1)],
+    ];
+
+    it.each(MUST_DENY)("blocks when %s", (_label, params) => {
+      expect(policy.shouldBlockPostParamsNormalization(params, APPROVE_HBAR_TOOL)).toBe(true);
+    });
+  });
+
+  describe("approve_token_allowance_tool", () => {
+    it("allows an approval under the limit", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(
+          approveTokenParams([{ tokenId: "0.0.1", amount: 5 }]),
+          APPROVE_TOKEN_TOOL,
+        ),
+      ).toBe(false);
+    });
+
+    it("blocks an approval over the limit", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(
+          approveTokenParams([{ tokenId: "0.0.1", amount: 50 }]),
+          APPROVE_TOKEN_TOOL,
+        ),
+      ).toBe(true);
+    });
+
+    // Each entry carries its own tokenId, so 10 of token A beside 10 of token B
+    // is two separate caps and not a 20 cap on the pair. Summing here would
+    // block a pair of perfectly legal approvals.
+    it("checks each token separately instead of summing across tokens", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(
+          approveTokenParams([
+            { tokenId: "0.0.1", amount: 10 },
+            { tokenId: "0.0.2", amount: 10 },
+          ]),
+          APPROVE_TOKEN_TOOL,
+        ),
+      ).toBe(false);
+    });
+
+    it("still blocks when one token among several is over the limit", () => {
+      const { decision, reason } = evaluateTransferSize(
+        approveTokenParams([
+          { tokenId: "0.0.1", amount: 5 },
+          { tokenId: "0.0.2", amount: 50 },
+          { tokenId: "0.0.3", amount: 5 },
+        ]),
+        APPROVE_TOKEN_TOOL,
+      );
+      expect(decision).toBe("DENY");
+      expect(reason).toContain("tokenApprovals[1]");
+    });
+
+    it("allows zero, because zero is a revocation", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(
+          approveTokenParams([{ tokenId: "0.0.1", amount: 0 }]),
+          APPROVE_TOKEN_TOOL,
+        ),
+      ).toBe(false);
+    });
+
+    it("allows a revocation sitting beside a legal approval", () => {
+      expect(
+        policy.shouldBlockPostParamsNormalization(
+          approveTokenParams([
+            { tokenId: "0.0.1", amount: 0 },
+            { tokenId: "0.0.2", amount: 5 },
+          ]),
+          APPROVE_TOKEN_TOOL,
+        ),
+      ).toBe(false);
+    });
+
+    const MUST_DENY = [
+      ["rawParams missing", {}],
+      ["tokenApprovals null", approveTokenParams(null)],
+      ["tokenApprovals empty", approveTokenParams([])],
+      ["tokenApprovals is a string", approveTokenParams("5")],
+      ["entry not an object", approveTokenParams(["5"])],
+      ["amount missing", approveTokenParams([{ tokenId: "0.0.1" }])],
+      ["amount unparseable", approveTokenParams([{ tokenId: "0.0.1", amount: "abc" }])],
+      ["amount empty string", approveTokenParams([{ tokenId: "0.0.1", amount: "" }])],
+      ["amount boolean", approveTokenParams([{ tokenId: "0.0.1", amount: true }])],
+      ["amount NaN", approveTokenParams([{ tokenId: "0.0.1", amount: NaN }])],
+      ["amount Infinity", approveTokenParams([{ tokenId: "0.0.1", amount: Infinity }])],
+      ["amount negative", approveTokenParams([{ tokenId: "0.0.1", amount: -1 }])],
+      ["one legal approval beside one unreadable", approveTokenParams([
+        { tokenId: "0.0.1", amount: 5 },
+        { tokenId: "0.0.2", amount: "abc" },
+      ])],
+    ];
+
+    it.each(MUST_DENY)("blocks when %s", (_label, params) => {
+      expect(policy.shouldBlockPostParamsNormalization(params, APPROVE_TOKEN_TOOL)).toBe(true);
+    });
+  });
+
+  // The time window carries no amount logic, so the only thing worth asserting
+  // is that the two policies cover exactly the same surface. A tool governed by
+  // one and not the other is a gap nothing else reports.
+  describe("both policies cover the same surface", () => {
+    it("registers the identical tool list on both policies", () => {
+      expect(new TimeWindowPolicy().relevantTools).toEqual(new TransferSizeLimitPolicy().relevantTools);
     });
   });
 });
